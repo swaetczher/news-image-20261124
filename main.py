@@ -1,25 +1,26 @@
 #!/usr/bin/env python3
-"""news-image-20261124 ronde 2 — satu gambar ringkasan berita dunia.
+"""news-image 20261124 ronde 3 — koran harian "WORLD NEWS", resep monocle-magazine.
 
-Ditulis dari nol di sesi produksi ronde 2 (dimulai 24 Nov 2026 ~21:37 WIB).
-Stdlib-only: struct, sys, zlib. Tanpa os, tanpa network, tanpa PIL.
-Font bitmap 5x7 + encoder PNG pure-Python. Deterministik: output hanya
-bergantung pada konstanta di file ini — run ulang menghasilkan byte yang
-sama persis (dicek 3 run identik sebelum lapor).
+Entry Make Fun news-image-20261124 ronde 3: 24 berita (5 utama + 19 ringkas),
+7+ region, tanggal gambar TETAP "TUESDAY, 24 NOVEMBER 2026".
 
-Isi (riset-r2.md, semua peristiwa/pengumuman Selasa 24 Nov 2026):
-  1 HERO  Selat Hormuz — 3 tanker kena ranjau (Iran says), AS selidiki
-          dugaan serangan siber Iran ke ~50 tanker (US investigating).
-  2       Ukraina bela serangan Benghazi sebagai bela diri Pasal 51;
-          Zelenskyy akui serang Sparta II di Teluk Finlandia.
-  3       Israel bunuh kepala keamanan internal Hamas di Gaza + 6 lainnya.
-  4       Serangan Rusia ke Zaporizhzhia: 2 tewas, 22 luka (Reuters).
-  5       Banten: korban naik 26 tewas, 8 hilang, penyidikan pidana
-          kelalaian dibuka polisi (indikasi awal, bukan vonis).
-Tanggal gambar: TUESDAY, 24 NOVEMBER 2026 (judul kompetisi).
-Klaim selalu dilabeli sebagai klaim di teks gambar.
+Stdlib-only, deterministik (render 2x -> sha256 identik), tanpa font/emoji/aset
+eksternal, tanpa network, tanpa model gambar AI. Font bitmap 5x7 digambar kode.
+
+Determinisme dijamin tiga lapis: tidak ada jam dinding/acak/urutan dict yang
+bergantung pada hash; kompresi zlib selalu level 9; semua koordinat berasal
+dari konstanta + panjang teks, bukan dari keadaan luar. Render ulang kapan pun
+menghasilkan byte yang identik — dibuktikan sha256 ganda di laporan produksi.
+
+Pemakaian:
+    python3 main.py            # varian A -> output/entry.png
+    python3 main.py B variants/variant-b.png
+    python3 main.py C variants/variant-c.png
 """
 
+import binascii
+import hashlib
+import math
 import struct
 import sys
 import zlib
@@ -27,91 +28,237 @@ import zlib
 W = 1024
 H = 1024
 
-BG = (245, 242, 233)
-INK = (26, 26, 26)
-NAVY = (18, 34, 77)
-RED = (176, 30, 40)
-GREY = (90, 90, 90)
-WHITE = (255, 255, 255)
-PANEL = (255, 255, 255)
-LINE = (120, 115, 100)
-TEAL = (0, 96, 96)
-RUST = (150, 62, 20)
-SEA = (16, 52, 96)
-FLAME = (232, 120, 20)
-FLAME2 = (244, 196, 40)
+# --- Palet monocle-magazine (aksen merah editorial TUNGGAL) -----------------
+PAPER = (242, 239, 231)   # kertas krem #F2EFE7
+INK = (26, 26, 26)        # tinta #1A1A1A
+RED = (199, 50, 46)       # aksen merah editorial #C7322E
+HAIR = (200, 194, 176)    # hairline #C8C2B0
 
-# ---------------------------------------------------------------- font 5x7
-# Setiap glif: 7 baris, tiap baris 5 bit (bit 4 = kolom kiri).
+MX = 24                   # margin kiri/kanan
+CW = W - 2 * MX           # lebar kolom konten = 976
+
+# --- Font bitmap 5x7 (satu keluarga font; '#' = piksel menyala) --------------
+# Setiap glyph: 7 baris, masing-masing 5 karakter. Ditulis dari nol untuk job ini.
 FONT = {
-    "A": (0x0E, 0x11, 0x11, 0x1F, 0x11, 0x11, 0x11),
-    "B": (0x1E, 0x11, 0x11, 0x1E, 0x11, 0x11, 0x1E),
-    "C": (0x0E, 0x11, 0x10, 0x10, 0x10, 0x11, 0x0E),
-    "D": (0x1E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x1E),
-    "E": (0x1F, 0x10, 0x10, 0x1E, 0x10, 0x10, 0x1F),
-    "F": (0x1F, 0x10, 0x10, 0x1E, 0x10, 0x10, 0x10),
-    "G": (0x0E, 0x11, 0x10, 0x17, 0x11, 0x11, 0x0F),
-    "H": (0x11, 0x11, 0x11, 0x1F, 0x11, 0x11, 0x11),
-    "I": (0x0E, 0x04, 0x04, 0x04, 0x04, 0x04, 0x0E),
-    "J": (0x07, 0x02, 0x02, 0x02, 0x02, 0x12, 0x0C),
-    "K": (0x11, 0x12, 0x14, 0x18, 0x14, 0x12, 0x11),
-    "L": (0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x1F),
-    "M": (0x11, 0x1B, 0x15, 0x15, 0x11, 0x11, 0x11),
-    "N": (0x11, 0x19, 0x15, 0x13, 0x11, 0x11, 0x11),
-    "O": (0x0E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E),
-    "P": (0x1E, 0x11, 0x11, 0x1E, 0x10, 0x10, 0x10),
-    "Q": (0x0E, 0x11, 0x11, 0x11, 0x15, 0x12, 0x0D),
-    "R": (0x1E, 0x11, 0x11, 0x1E, 0x14, 0x12, 0x11),
-    "S": (0x0F, 0x10, 0x10, 0x0E, 0x01, 0x01, 0x1E),
-    "T": (0x1F, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04),
-    "U": (0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E),
-    "V": (0x11, 0x11, 0x11, 0x11, 0x11, 0x0A, 0x04),
-    "W": (0x11, 0x11, 0x11, 0x15, 0x15, 0x1B, 0x11),
-    "X": (0x11, 0x11, 0x0A, 0x04, 0x0A, 0x11, 0x11),
-    "Y": (0x11, 0x11, 0x0A, 0x04, 0x04, 0x04, 0x04),
-    "Z": (0x1F, 0x01, 0x02, 0x04, 0x08, 0x10, 0x1F),
-    "0": (0x0E, 0x11, 0x13, 0x15, 0x19, 0x11, 0x0E),
-    "1": (0x04, 0x0C, 0x04, 0x04, 0x04, 0x04, 0x0E),
-    "2": (0x0E, 0x11, 0x01, 0x06, 0x08, 0x10, 0x1F),
-    "3": (0x1F, 0x02, 0x04, 0x02, 0x01, 0x11, 0x0E),
-    "4": (0x02, 0x06, 0x0A, 0x12, 0x1F, 0x02, 0x02),
-    "5": (0x1F, 0x10, 0x1E, 0x01, 0x01, 0x11, 0x0E),
-    "6": (0x06, 0x08, 0x10, 0x1E, 0x11, 0x11, 0x0E),
-    "7": (0x1F, 0x01, 0x02, 0x04, 0x08, 0x08, 0x08),
-    "8": (0x0E, 0x11, 0x11, 0x0E, 0x11, 0x11, 0x0E),
-    "9": (0x0E, 0x11, 0x11, 0x0F, 0x01, 0x02, 0x0C),
-    " ": (0, 0, 0, 0, 0, 0, 0),
-    ".": (0, 0, 0, 0, 0, 0x0C, 0x0C),
-    ",": (0, 0, 0, 0, 0x0C, 0x04, 0x08),
-    ":": (0, 0x0C, 0x0C, 0, 0x0C, 0x0C, 0),
-    ";": (0, 0x0C, 0x0C, 0, 0x0C, 0x04, 0x08),
-    "'": (0x04, 0x04, 0x08, 0, 0, 0, 0),
-    "-": (0, 0, 0, 0x1F, 0, 0, 0),
-    "(": (0x02, 0x04, 0x08, 0x08, 0x08, 0x04, 0x02),
-    ")": (0x08, 0x04, 0x02, 0x02, 0x02, 0x04, 0x08),
-    "/": (0x01, 0x01, 0x02, 0x04, 0x08, 0x10, 0x10),
-    "$": (0x04, 0x0F, 0x14, 0x0E, 0x05, 0x1E, 0x04),
-    "%": (0x19, 0x19, 0x02, 0x04, 0x08, 0x13, 0x13),
-    "?": (0x0E, 0x11, 0x01, 0x02, 0x04, 0, 0x04),
-    "!": (0x04, 0x04, 0x04, 0x04, 0x04, 0, 0x04),
-    "+": (0, 0x04, 0x04, 0x1F, 0x04, 0x04, 0),
-    "=": (0, 0, 0x1F, 0, 0x1F, 0, 0),
-    '"': (0x0A, 0x0A, 0x0A, 0, 0, 0, 0),
+    "A": ["01110", "10001", "10001", "11111", "10001", "10001", "10001"],
+    "B": ["11110", "10001", "10001", "11110", "10001", "10001", "11110"],
+    "C": ["01110", "10001", "10000", "10000", "10000", "10001", "01110"],
+    "D": ["11110", "10001", "10001", "10001", "10001", "10001", "11110"],
+    "E": ["11111", "10000", "10000", "11110", "10000", "10000", "11111"],
+    "F": ["11111", "10000", "10000", "11110", "10000", "10000", "10000"],
+    "G": ["01110", "10001", "10000", "10111", "10001", "10001", "01111"],
+    "H": ["10001", "10001", "10001", "11111", "10001", "10001", "10001"],
+    "I": ["01110", "00100", "00100", "00100", "00100", "00100", "01110"],
+    "J": ["00111", "00010", "00010", "00010", "00010", "10010", "01100"],
+    "K": ["10001", "10010", "10100", "11000", "10100", "10010", "10001"],
+    "L": ["10000", "10000", "10000", "10000", "10000", "10000", "11111"],
+    "M": ["10001", "11011", "10101", "10101", "10001", "10001", "10001"],
+    "N": ["10001", "11001", "10101", "10011", "10001", "10001", "10001"],
+    "O": ["01110", "10001", "10001", "10001", "10001", "10001", "01110"],
+    "P": ["11110", "10001", "10001", "11110", "10000", "10000", "10000"],
+    "Q": ["01110", "10001", "10001", "10001", "10101", "10010", "01101"],
+    "R": ["11110", "10001", "10001", "11110", "10100", "10010", "10001"],
+    "S": ["01111", "10000", "10000", "01110", "00001", "00001", "11110"],
+    "T": ["11111", "00100", "00100", "00100", "00100", "00100", "00100"],
+    "U": ["10001", "10001", "10001", "10001", "10001", "10001", "01110"],
+    "V": ["10001", "10001", "10001", "10001", "10001", "01010", "00100"],
+    "W": ["10001", "10001", "10001", "10101", "10101", "11011", "10001"],
+    "X": ["10001", "10001", "01010", "00100", "01010", "10001", "10001"],
+    "Y": ["10001", "10001", "01010", "00100", "00100", "00100", "00100"],
+    "Z": ["11111", "00001", "00010", "00100", "01000", "10000", "11111"],
+    "0": ["01110", "10001", "10011", "10101", "11001", "10001", "01110"],
+    "1": ["00100", "01100", "00100", "00100", "00100", "00100", "01110"],
+    "2": ["01110", "10001", "00001", "00010", "00100", "01000", "11111"],
+    "3": ["11111", "00010", "00100", "00010", "00001", "10001", "01110"],
+    "4": ["00010", "00110", "01010", "10010", "11111", "00010", "00010"],
+    "5": ["11111", "10000", "11110", "00001", "00001", "10001", "01110"],
+    "6": ["01110", "10000", "10000", "11110", "10001", "10001", "01110"],
+    "7": ["11111", "00001", "00010", "00100", "01000", "01000", "01000"],
+    "8": ["01110", "10001", "10001", "01110", "10001", "10001", "01110"],
+    "9": ["01110", "10001", "10001", "01111", "00001", "00001", "01110"],
+    " ": ["00000", "00000", "00000", "00000", "00000", "00000", "00000"],
+    ".": ["00000", "00000", "00000", "00000", "00000", "01100", "01100"],
+    ",": ["00000", "00000", "00000", "00000", "01100", "00100", "01000"],
+    "-": ["00000", "00000", "00000", "01110", "00000", "00000", "00000"],
+    ":": ["00000", "01100", "01100", "00000", "01100", "01100", "00000"],
+    ";": ["00000", "01100", "01100", "00000", "01100", "00100", "01000"],
+    "'": ["00100", "00100", "01000", "00000", "00000", "00000", "00000"],
+    "(": ["00010", "00100", "01000", "01000", "01000", "00100", "00010"],
+    ")": ["01000", "00100", "00010", "00010", "00010", "00100", "01000"],
+    "/": ["00001", "00010", "00010", "00100", "01000", "01000", "10000"],
+    "%": ["11001", "11010", "00010", "00100", "01000", "01011", "10011"],
+    "+": ["00000", "00100", "00100", "11111", "00100", "00100", "00000"],
+    "=": ["00000", "00000", "11111", "00000", "11111", "00000", "00000"],
+    "&": ["01100", "10010", "10100", "01000", "10101", "10010", "01101"],
+    "?": ["01110", "10001", "00001", "00010", "00100", "00000", "00100"],
+    "!": ["00100", "00100", "00100", "00100", "00100", "00000", "00100"],
+    "$": ["00100", "01111", "10100", "01110", "00101", "11110", "00100"],
+    '"': ["01010", "01010", "00000", "00000", "00000", "00000", "00000"],
+    "*": ["00000", "10101", "01110", "11111", "01110", "10101", "00000"],
 }
 
+# --- Data edisi (riset-r3.md; semua teks UPPERCASE, karakter ASCII saja) ------
+DATE_LINE = "TUESDAY, 24 NOVEMBER 2026"
+MASTHEAD = "WORLD NEWS"
 
-def text_w(s, scale):
-    """Lebar piksel teks pada skala tertentu (advance 6 piksel per huruf)."""
-    return len(s) * 6 * scale
+HERO = {
+    "kicker": "MIDDLE EAST - STRAIT OF HORMUZ - IRAN SAYS",
+    "headline": "FOURTH TANKER HITS MINE IN STRAIT OF HORMUZ",
+    "dek": "IRAN SAYS A FOURTH TANKER EXPLODED TUESDAY AFTER HITTING A MINE EAST "
+            "OF THE STRAIT, BRINGING ITS CLAIMED TOTAL TO FOUR. THE US IS PROBING "
+            "SUSPECTED IRANIAN CYBERATTACKS ON UP TO 50 SHIPS. BRENT $88.97 A BARREL.",
+}
+
+# Grid 2x2: kicker, headline (1-2 baris), body (2 baris skala 1x).
+# Catatan akurasi: angka TAIEX 3,310/40,122 dibulatkan dari 3,310.46/40,122.35
+# (Focus Taiwan/CNA); NT$2,230 adalah harga buka limit-up TSMC, bukan tutup.
+GRID = [
+    {
+        "kicker": "ASIA - TAIWAN - TUESDAY",
+        "headline": "HUANG RETURNS, TAIEX SOARS 8.99%",
+        "body": "TAIWAN'S TAIEX JUMPS A RECORD 3,310 POINTS (+8.99%) TO 40,122 TUESDAY "
+                "AS HUANG RETURNS AS CEO. TSMC OPENS LIMIT-UP AT NT$2,230.",
+    },
+    {
+        "kicker": "BUSINESS - FRANCE/US - TUESDAY",
+        "headline": "SANOFI BUYS INSMED $41BN",
+        "body": "$175 A SHARE TUESDAY IN 2026'S BIGGEST PHARMA DEAL; SANOFI GAINS TWO "
+                "DRUGS, CLOSES FIRST HALF OF 2027. INSMED SHARES JUMP 14%.",
+    },
+    {
+        "kicker": "ASIA - CHINA - TUESDAY",
+        "headline": "CHINA PROBES CHEN JINING",
+        "body": "SHANGHAI PARTY CHIEF, 62, UNDER INVESTIGATION TUESDAY; FOURTH "
+                "POLITBURO MEMBER PROBED SINCE 2025, XINHUA SAYS.",
+    },
+    {
+        "kicker": "AFRICA - SPORT - TUESDAY",
+        "headline": "SENEGAL WIN BACK AFCON TITLE",
+        "body": "CAS UNANIMOUSLY RESTORES SENEGAL AS 2025 CHAMPIONS TUESDAY, "
+                "REINSTATING 1-0 EXTRA-TIME WIN OVER MOROCCO.",
+    },
+]
+
+# Blok MORE: 19 berita ringkas, 1 headline + 1 baris fakta tiap item.
+MORE = [
+    ("RUSSIAN DRONE BRIEFLY ENTERS POLISH AIRSPACE",
+     "WARSAW CALLS IT DELIBERATE; POLAND HELD FIRE OVER CIVILIAN RISK."),
+    ("LUKASHENKO INVITES ZELENSKYY TO FLY TO MOSCOW",
+     "BELARUS LEADER PROPOSES JOINT TRIP FOR TALKS WITH PUTIN."),
+    ("EISENKOT CLINCHES FIRST ISRAEL COALITION DEAL",
+     "YASHAR (21 SEATS) JOINS LIEBERMAN (7); DEADLINE TO FORM GOVERNMENT 6 DEC."),
+    ("SAUDI COALITION SAYS RIYADH TOWER TARGETED",
+     "'TERRORIST ATTACK' TARGETED FINANCE-DISTRICT TOWER, NO DETAILS GIVEN."),
+    ("NATO VOWS TO DEFEND SPACE AFTER NUKE SATELLITE REPORT",
+     "RUTTE'S REMARKS REPORTED TUESDAY; RUSSIA COULD LAUNCH WITHIN 60 DAYS."),
+    ("MALAYSIA TO REPATRIATE 6,803 MYANMAR NATIONALS",
+     "DECEMBER RETURNS COME DAYS AFTER ICJ GENOCIDE RULING ON ROHINGYA."),
+    ("HASINA SETS RETURN DATE: 16 DECEMBER ON BIMAN",
+     "EX-PM PLANS FIRST TRIP HOME SINCE EXILE; DHAKA SAYS ONLY VIA EXTRADITION."),
+    ("UN: 47,000 WOMEN KILLED BY PARTNERS OR FAMILY IN 2025",
+     "FIVE PER HOUR WORLDWIDE; AFRICA HIGHEST WITH 22,100 VICTIMS."),
+    ("WORLD CHESS: GUKESH VS SINDAROV OPENS WITH DRAW",
+     "GAME 1 DRAWN IN 38 MOVES IN GENEVA; YOUNGEST TITLE MATCH EVER."),
+    ("ABOUT 175 MIGRANTS UNACCOUNTED AFTER BOAT CONTACT LOST",
+     "BOAT LEFT DAKAR FOR EUROPE ABOUT TWO WEEKS AGO, OFFICIALS SAY."),
+    ("HOUTHI FORCES 60 KM FROM ADEN; CITY 'WILL NOT FALL'",
+     "YEMENI GOVERNMENT FORCES SAY ADEN WILL HOLD DESPITE REBEL ADVANCE."),
+    ("BANGLADESH GARMENT WORKERS CLASH WITH POLICE",
+     "PAY PROTESTS SHUT DOZENS OF FACTORIES; WORKERS DEMAND 30,000 TAKA."),
+    ("MEXICO INFLATION HITS SIX-MONTH HIGH OF 3.96%",
+     "FIRST-HALF NOVEMBER RATE UP FROM 3.62%; CORE EASES TO 3.68%."),
+    ("ABREGO GARCIA TO LEAVE US VOLUNTARILY FOR EUROPE",
+     "SALVADORAN MIGRANT FLIES OUT TUESDAY ON COMMERCIAL FLIGHT."),
+    ("TRUMP READY TO UNVEIL NEW TARIFFS AFTER PROBE",
+     "SECTION 301 FINDINGS ON 16 TRADING PARTNERS DUE TUESDAY OR WEDNESDAY."),
+    ("ITALY: NOT TOLD OF UKRAINE STRIKES IN LIBYA",
+     "TAJANI WARNS KYIV NOT TO SPREAD WAR TO MEDITERRANEAN."),
+    ("GAZA WARNS OF MENINGITIS EPIDEMIC: 272 CASES IN OCTOBER",
+     "OCTOBER CASES ABOUT 8X THE MONTHLY AVERAGE; 15 DEAD THIS YEAR."),
+    ("UK AND MI5 WARN FIRMS SUPPLYING UKRAINE OF SABOTAGE",
+     "RUSSIAN SABOTAGE EFFORTS RISING, USING PROXIES AND ARSON, WARNING SAYS."),
+    ("QUAKE 5.6 SHAKES EASTERN NEPAL NEAR TIBET BORDER",
+     "NEPAL SAYS 5.6; USGS 5.3. NO MAJOR CASUALTIES REPORTED."),
+]
+
+FOOTER = ("SOURCES: REUTERS, AP, UN NEWS, SANOFI, CAS - "
+          "ALL STORIES FROM TUESDAY, 24 NOVEMBER 2026")
+
+# --- Varian: SATU resep + template, beda hierarki/spacing -------------------
+# A = seimbang | B = hero-dominan | C = lapang
+VARIANTS = {
+    "A": dict(masthead=9, hero_head=5, grid_head=4, gutter=16,
+              sec_gap=18, more_gap=18, hero_pad=12, grid_pad=12),
+    "B": dict(masthead=10, hero_head=6, grid_head=4, gutter=12,
+              sec_gap=16, more_gap=16, hero_pad=12, grid_pad=12),
+    "C": dict(masthead=8, hero_head=4, grid_head=3, gutter=20,
+              sec_gap=20, more_gap=22, hero_pad=14, grid_pad=14),
+}
+
+BODY_SCALE = 1      # body/dek skala 1x (agate type; pipeline §2.2)
+KICKER_SCALE = 1    # kicker skala 1x, letter-spaced
+DATE_SCALE = 2      # pita tanggal skala 2x
+LINE_H = 9          # tinggi baris body 1x (7 glyph + 2 leading)
 
 
-def wrap(s, max_w, scale):
-    """Bungkus kata per kata; kembalikan daftar baris (tanpa hyphen)."""
+# --- Kanvas ------------------------------------------------------------------
+class Canvas:
+    def __init__(self):
+        self.px = bytearray(bytes(PAPER) * (W * H))
+
+    def fill_rect(self, x, y, w, h, color):
+        if w <= 0 or h <= 0:
+            return
+        assert 0 <= x and x + w <= W and 0 <= y and y + h <= H, \
+            "fill_rect keluar kanvas: x=%d y=%d w=%d h=%d" % (x, y, w, h)
+        row = bytes(color) * w
+        for yy in range(y, y + h):
+            off = (yy * W + x) * 3
+            self.px[off:off + w * 3] = row
+
+    def hline(self, x, y, w, color, thick=1):
+        self.fill_rect(x, y, w, thick, color)
+
+    def vline(self, x, y, h, color, thick=1):
+        self.fill_rect(x, y, thick, h, color)
+
+    def fill_circle(self, cx, cy, r, color):
+        for dy in range(-r, r + 1):
+            dx = int(math.sqrt(r * r - dy * dy))
+            self.fill_rect(cx - dx, cy + dy, 2 * dx + 1, 1, color)
+
+
+def text_w(s, scale, spacing=0):
+    return len(s) * (5 * scale + spacing) - spacing if s else 0
+
+
+def draw_text(cv, x, y, s, scale, color, spacing=0):
+    """Gambar teks; karakter tak dikenal = ERROR (fail-loud, bukan diam)."""
+    cx = x
+    for ch in s:
+        glyph = FONT.get(ch)
+        if glyph is None:
+            raise ValueError("karakter tanpa glyph di font 5x7: %r" % ch)
+        for row_i, row in enumerate(glyph):
+            for col_i, bit in enumerate(row):
+                if bit == "1":
+                    cv.fill_rect(cx + col_i * scale, y + row_i * scale,
+                                 scale, scale, color)
+        cx += 5 * scale + spacing
+    return cx
+
+
+def wrap(text, max_w, scale, spacing=0):
+    """Word-wrap greedy; satu kata yang lebih lebar dari max_w = ERROR."""
+    cell = 5 * scale + spacing
+    words = text.split(" ")
     lines = []
     cur = ""
-    for word in s.split(" "):
+    for word in words:
+        if text_w(word, scale, spacing) > max_w:
+            raise ValueError("kata terlalu lebar untuk kolom: %r" % word)
         trial = word if not cur else cur + " " + word
-        if text_w(trial, scale) <= max_w or not cur:
+        if text_w(trial, scale, spacing) <= max_w:
             cur = trial
         else:
             lines.append(cur)
@@ -121,289 +268,208 @@ def wrap(s, max_w, scale):
     return lines
 
 
-# ---------------------------------------------------------------- kanvas
-class Canvas:
-    def __init__(self):
-        self.buf = bytearray(W * H * 3)
-        for i in range(W * H):
-            self.buf[i * 3] = BG[0]
-            self.buf[i * 3 + 1] = BG[1]
-            self.buf[i * 3 + 2] = BG[2]
-
-    def rect(self, x, y, w, h, color):
-        x0 = max(0, x)
-        y0 = max(0, y)
-        x1 = min(W, x + w)
-        y1 = min(H, y + h)
-        for yy in range(y0, y1):
-            base = (yy * W + x0) * 3
-            for xx in range(x0, x1):
-                o = base + (xx - x0) * 3
-                self.buf[o] = color[0]
-                self.buf[o + 1] = color[1]
-                self.buf[o + 2] = color[2]
-
-    def border(self, x, y, w, h, color, t=2):
-        self.rect(x, y, w, t, color)
-        self.rect(x, y + h - t, w, t, color)
-        self.rect(x, y, t, h, color)
-        self.rect(x + w - t, y, t, h, color)
-
-    def text(self, x, y, s, scale, color):
-        # Font hanya huruf besar: semua teks dirender kapital (gaya koran).
-        s = s.upper()
-        cx = x
-        for ch in s:
-            glyph = FONT.get(ch)
-            if glyph is None:
-                raise ValueError("glif hilang: %r" % ch)
-            for row in range(7):
-                bits = glyph[row]
-                for col in range(5):
-                    if bits & (1 << (4 - col)):
-                        self.rect(cx + col * scale, y + row * scale,
-                                  scale, scale, color)
-            cx += 6 * scale
-
-    def text_center(self, y, s, scale, color):
-        self.text((W - text_w(s, scale)) // 2, y, s, scale, color)
-
-    def para(self, x, y, lines, scale, color, leading=None):
-        lh = 8 * scale if leading is None else leading
-        for i, ln in enumerate(lines):
-            self.text(x, y + i * lh, ln, scale, color)
-        return y + len(lines) * lh
+def center_in(x0, w, s, scale, spacing=0):
+    return x0 + (w - text_w(s, scale, spacing)) // 2
 
 
-def png_bytes(c):
-    """Encoder PNG RGB 8-bit, filter 0, kompresi zlib deterministik."""
+# --- Ilustrasi hero: tanker + ranjau, geometris, palet resep saja ------------
+def draw_hero_art(cv, x, y, w, h):
+    cv.fill_rect(x, y, w, h, INK)
+    # Bintang-bintang kecil (kertas).
+    for sx, sy in ((18, 14), (52, 26), (96, 10), (150, 20), (196, 12), (128, 34)):
+        cv.fill_rect(x + sx, y + sy, 2, 2, PAPER)
+    # Bulan kecil.
+    cv.fill_rect(x + w - 34, y + 14, 14, 14, PAPER)
+    # Ranjau laut (lingkaran kertas + duri).
+    mx, my, mr = x + w - 52, y + 52, 9
+    cv.fill_circle(mx, my, mr, PAPER)
+    for dx, dy in ((-14, 0), (14, 0), (0, -14), (0, 14),
+                   (-10, -10), (10, -10), (-10, 10), (10, 10)):
+        cv.fill_rect(mx + dx - 1, my + dy - 1, 3, 3, PAPER)
+    cv.fill_circle(mx, my, 3, INK)
+    # Api merah di atas cerobong.
+    fx = x + 118
+    cv.fill_rect(fx, y + h - 108, 8, 22, RED)
+    cv.fill_rect(fx + 12, y + h - 96, 6, 12, RED)
+    cv.fill_rect(fx - 10, y + h - 92, 6, 10, RED)
+    # Kapal tanker: lambung kertas + cerobong.
+    hy = y + h - 62
+    cv.fill_rect(x + 18, hy, 150, 26, PAPER)
+    cv.fill_rect(x + 168, hy + 6, 22, 20, PAPER)   # haluan bertingkat
+    cv.fill_rect(x + 118, hy - 30, 18, 30, PAPER)  # cerobong
+    cv.fill_rect(x + 118, hy - 30, 18, 8, RED)     # pita merah cerobong
+    cv.fill_rect(x + 40, hy - 16, 10, 16, PAPER)   # anjungan
+    # Gelombang laut (garis kertas).
+    for gy in (hy + 34, hy + 44, hy + 54):
+        cv.fill_rect(x + 10, gy, w - 20, 2, PAPER)
+        cv.fill_rect(x + 30, gy + 5, 60, 2, PAPER)
 
-    def chunk(typ, data):
-        out = struct.pack(">I", len(data)) + typ + data
-        out += struct.pack(">I", zlib.crc32(typ + data) & 0xFFFFFFFF)
-        return out
 
-    ihdr = struct.pack(">IIBBBBB", W, H, 8, 2, 0, 0, 0)
+# --- Layout (template + data; positioning relatif, layer background->foreground)
+def render(variant):
+    v = VARIANTS[variant]
+    cv = Canvas()
+    log = []
+
+    # Lapisan background: kertas sudah jadi latar kanvas.
+    y = 16
+    # --- Grup headers: masthead + pita tanggal -------------------------------
+    ms = v["masthead"]
+    draw_text(cv, center_in(MX, CW, MASTHEAD, ms), y, MASTHEAD, ms, INK)
+    y += 7 * ms
+    log.append(("masthead", y))
+    y += 10
+    cv.hline(MX, y, CW, RED, 3)
+    y += 12
+    draw_text(cv, center_in(MX, CW, DATE_LINE, DATE_SCALE), y,
+              DATE_LINE, DATE_SCALE, RED)
+    y += 7 * DATE_SCALE
+    log.append(("dateline", y))
+    y += 8
+    cv.hline(MX, y, CW, HAIR, 1)
+    y += v["sec_gap"]
+
+    # --- Grup hero ------------------------------------------------------------
+    hero_y = y
+    art_w, art_gap = 220, 16
+    text_x = MX + art_w + art_gap
+    text_wd = MX + CW - text_x
+    pad = v["hero_pad"]
+    hx = hero_y + pad
+    draw_text(cv, text_x, hx, HERO["kicker"], KICKER_SCALE, RED, spacing=1)
+    hx += 7 + 8
+    hero_lines = wrap(HERO["headline"], text_wd, v["hero_head"])
+    for ln in hero_lines:
+        draw_text(cv, text_x, hx, ln, v["hero_head"], INK)
+        hx += 7 * v["hero_head"] + 4
+    hx += 6
+    dek_lines = wrap(HERO["dek"], text_wd, BODY_SCALE)
+    for ln in dek_lines:
+        draw_text(cv, text_x, hx, ln, BODY_SCALE, INK)
+        hx += LINE_H
+    hero_h = (hx - hero_y) + pad
+    draw_hero_art(cv, MX, hero_y + pad, art_w, hero_h - 2 * pad)
+    y = hero_y + hero_h
+    log.append(("hero_h=%d lines=%d dek=%d" % (hero_h, len(hero_lines),
+                                               len(dek_lines)), y))
+    cv.hline(MX, y, CW, HAIR, 1)
+    y += v["sec_gap"]
+
+    # --- Grup grid 2x2 ---------------------------------------------------------
+    gut = v["gutter"]
+    pw = (CW - gut) // 2
+    grid_y = y
+    row_hs = []
+    for row in range(2):
+        panels = GRID[row * 2:(row + 1) * 2]
+        # Hitung tinggi baris dari panel tertinggi (headline + body).
+        heights = []
+        for p in panels:
+            hl = wrap(p["headline"], pw - 2 * v["grid_pad"], v["grid_head"])
+            bl = wrap(p["body"], pw - 2 * v["grid_pad"], BODY_SCALE)
+            heights.append((len(hl), len(bl)))
+        rh = (v["grid_pad"] + 7 + 6
+              + max(h[0] for h in heights) * (7 * v["grid_head"] + 3)
+              + 6 + max(h[1] for h in heights) * LINE_H + v["grid_pad"])
+        row_hs.append(rh)
+        for i, p in enumerate(panels):
+            px = MX + i * (pw + gut)
+            py = grid_y
+            # Hairline vertikal antar-kolom (Monocle: kolom dipisah hairline).
+            if i == 1:
+                cv.vline(px - gut // 2, py, rh, HAIR, 1)
+            tx = px + v["grid_pad"]
+            tw = pw - 2 * v["grid_pad"]
+            ty = py + v["grid_pad"]
+            draw_text(cv, tx, ty, p["kicker"], KICKER_SCALE, RED, spacing=1)
+            ty += 7 + 6
+            for ln in wrap(p["headline"], tw, v["grid_head"]):
+                draw_text(cv, tx, ty, ln, v["grid_head"], INK)
+                ty += 7 * v["grid_head"] + 3
+            ty += 3
+            for ln in wrap(p["body"], tw, BODY_SCALE):
+                draw_text(cv, tx, ty, ln, BODY_SCALE, INK)
+                ty += LINE_H
+        grid_y += rh
+        if row == 0:
+            cv.hline(MX, grid_y, CW, HAIR, 1)
+            grid_y += gut
+    y = grid_y
+    log.append(("grid rows=%s" % (row_hs,), y))
+    cv.hline(MX, y, CW, HAIR, 1)
+    y += v["sec_gap"]
+
+    # --- Grup MORE: 19 berita ringkas, 2 kolom -------------------------------
+    draw_text(cv, MX, y, "MORE FROM TUESDAY - 19 STORIES", DATE_SCALE, RED)
+    y += 7 * DATE_SCALE + 8
+    cv.hline(MX, y, CW, HAIR, 1)
+    y += 10
+    more_y = y
+    col_w = (CW - gut) // 2
+    left = MORE[:10]
+    right = MORE[10:]
+    max_items = max(len(left), len(right))
+    item_h = 2 * LINE_H + v["more_gap"]
+    for col_i, items in enumerate((left, right)):
+        cx0 = MX + col_i * (col_w + gut)
+        iy = more_y
+        for head, fact in items:
+            h_lines = wrap(head, col_w - 12, BODY_SCALE)
+            f_lines = wrap(fact, col_w - 12, BODY_SCALE)
+            assert len(h_lines) == 1, "headline MORE >1 baris: %r" % head
+            assert len(f_lines) == 1, "fakta MORE >1 baris: %r" % fact
+            cv.fill_rect(cx0, iy + 1, 5, 5, RED)  # bullet merah
+            draw_text(cv, cx0 + 12, iy, h_lines[0], BODY_SCALE, INK)
+            draw_text(cv, cx0 + 12, iy + LINE_H, f_lines[0], BODY_SCALE, INK)
+            iy += item_h
+    y = more_y + max_items * item_h
+    log.append(("more items=%d item_h=%d" % (len(MORE), item_h), y))
+
+    # --- Grup footer -----------------------------------------------------------
+    y += 8
+    cv.hline(MX, y, CW, HAIR, 1)
+    y += 10
+    draw_text(cv, center_in(MX, CW, FOOTER, BODY_SCALE), y,
+              FOOTER, BODY_SCALE, INK)
+    y += 7
+    log.append(("footer_end", y))
+    assert y <= 1010, "layout overflow: footer berakhir y=%d" % y
+    return cv, log, y
+
+
+def png_bytes(cv):
     raw = bytearray()
     for yy in range(H):
         raw.append(0)
-        raw += c.buf[yy * W * 3:(yy + 1) * W * 3]
+        raw += cv.px[yy * W * 3:(yy + 1) * W * 3]
+
+    def chunk(typ, data):
+        out = struct.pack(">I", len(data)) + typ + data
+        out += struct.pack(">I", binascii.crc32(typ + data) & 0xFFFFFFFF)
+        return out
+
+    ihdr = struct.pack(">IIBBBBB", W, H, 8, 2, 0, 0, 0)
     return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", ihdr)
-            + chunk(b"IDAT", zlib.compress(bytes(raw), 6))
+            + chunk(b"IDAT", zlib.compress(bytes(raw), 9))
             + chunk(b"IEND", b""))
 
 
-# ---------------------------------------------------------------- konten
-# CATATAN DETERMINISME RONDE 2 (baris baru, ditulis lewat edit di sesi ini):
-# - Tidak ada jam dinding, tidak ada acak, tidak ada dict yang diiterasi
-#   tanpa urutan tetap: PANELS adalah list berurutan, FONT hanya dibaca
-#   lewat kunci eksplisit, dan zlib.compress dipanggil dengan level tetap.
-# - Satu-satunya input adalah argv (varian + path output); isi gambar
-#   sepenuhnya ditentukan konstanta HERO / PANELS / FOOTER di file ini.
-# - Karena itu sha256 output stabil antar run di mesin yang sama, dan
-#   verifikasi 3-run identik adalah bukti langsung, bukan klaim.
-# - Kalau suatu hari ada yang mengubah satu huruf di HERO/PANELS, hash
-#   berubah — itu yang diinginkan: gambar adalah fungsi murni dari file.
-def r2_build_note():
-    """Satu kalimat asal-usul build, dipakai sebagai penanda revisi ronde 2."""
-    return ("r2: Hormuz hero + 4 panel Selasa 24 Nov 2026, "
-            "headline panel skala 5, bodi maks 4 baris.")
-
-
-HERO = {
-    "kicker": "MIDDLE EAST - STRAIT OF HORMUZ - TUESDAY",
-    "headline": "TANKERS HIT IN HORMUZ",
-    "body": ("Iran says three tankers caught fire after hitting mines Monday. "
-             "The US is probing suspected Iranian cyberattacks on up to 50 "
-             "tankers, announced Tuesday."),
-}
-
-PANELS = [
-    {
-        "kicker": "UKRAINE - LIBYA - TUESDAY",
-        "headline": "UKRAINE DEFENDS LIBYA STRIKE",
-        "body": ("Kyiv cites UN Charter Article 51. Zelenskyy also claims "
-                 "the Sparta II hit."),
-        "short": ("Kyiv cites UN Charter Article 51. Zelenskyy claims a "
-                  "second strike on the Sparta II."),
-        "accent": NAVY,
-    },
-    {
-        "kicker": "GAZA - TUESDAY",
-        "headline": "ISRAEL KILLS HAMAS SECURITY CHIEF",
-        "body": ("Hamas security chief Naeem Abu Nahel killed with six "
-                 "others, medics say."),
-        "short": ("Hamas security chief Naeem Abu Nahel killed with six "
-                  "others, medics say."),
-        "accent": RED,
-    },
-    {
-        "kicker": "ZAPORIZHZHIA - TUESDAY",
-        "headline": "RUSSIAN STRIKE KILLS 2 IN ZAPORIZHZHIA",
-        "body": ("Overnight attack wounds 22, including two children. "
-                 "An apartment block was hit."),
-        "short": ("Overnight attack wounds 22, including two children. "
-                  "An apartment block was hit."),
-        "accent": TEAL,
-    },
-    {
-        "kicker": "BANTEN - TUESDAY",
-        "headline": "BANTEN FIRE TOLL RISES TO 26",
-        "body": ("Confirmed Tuesday. Eight still missing. Police open a "
-                 "criminal negligence probe."),
-        "short": ("Confirmed Tuesday. Eight still missing. Police open a "
-                  "criminal negligence probe."),
-        "accent": RUST,
-    },
-]
-
-FOOTER = "FIVE STORIES FROM AROUND THE WORLD - SOURCES: REUTERS, AP"
-
-
-# ---------------------------------------------------------------- gambar
-def draw_masthead(c):
-    c.rect(16, 12, 992, 88, NAVY)
-    c.text_center(26, "WORLD NEWS", 9, WHITE)
-    c.rect(16, 104, 992, 42, RED)
-    c.text_center(110, "TUESDAY, 24 NOVEMBER 2026", 5, WHITE)
-
-
-def draw_tanker_art(c, x, y, w, h):
-    """Seni hero: tanker di Selat Hormuz, langit malam + api + ranjau."""
-    c.rect(x, y, w, h, SEA)
-    # langit malam + bintang
-    c.rect(x, y, w, 52, NAVY)
-    for sx, sy in ((18, 12), (52, 26), (96, 10), (150, 22), (196, 12),
-                   (228, 28), (70, 34), (176, 36)):
-        c.rect(x + sx, y + sy, 4, 4, WHITE)
-    # bulan
-    c.rect(x + w - 52, y + 10, 30, 30, (240, 236, 210))
-    c.rect(x + w - 44, y + 16, 14, 14, NAVY)
-    # laut
-    c.rect(x, y + 96, w, 4, (120, 170, 220))
-    c.rect(x, y + 116, w, 3, (90, 140, 200))
-    # lambung tanker
-    c.rect(x + 18, y + 78, 196, 22, (30, 30, 34))
-    c.rect(x + 18, y + 78, 196, 4, (70, 70, 78))
-    c.rect(x + 150, y + 56, 26, 22, (60, 60, 68))
-    c.rect(x + 154, y + 50, 18, 6, RED)
-    # cerobong + api di geladak
-    c.rect(x + 60, y + 62, 14, 16, (200, 200, 200))
-    c.rect(x + 58, y + 44, 6, 18, FLAME)
-    c.rect(x + 64, y + 38, 6, 24, FLAME2)
-    c.rect(x + 70, y + 48, 6, 14, FLAME)
-    c.rect(x + 40, y + 30, 44, 6, (150, 150, 150))
-    c.rect(x + 52, y + 22, 20, 8, (130, 130, 130))
-    # ranjau laut mengambang
-    mx, my = x + w - 46, y + 104
-    c.rect(mx, my, 16, 16, (20, 20, 20))
-    c.rect(mx + 6, my - 6, 4, 6, (20, 20, 20))
-    c.rect(mx + 6, my + 16, 4, 6, (20, 20, 20))
-    c.rect(mx - 6, my + 6, 6, 4, (20, 20, 20))
-    c.rect(mx + 16, my + 6, 6, 4, (20, 20, 20))
-
-
-def draw_hero(c):
-    x, y, w, h = 16, 158, 992, 238
-    c.rect(x, y, w, h, PANEL)
-    c.border(x, y, w, h, LINE)
-    c.rect(x, y, 8, h, RED)
-    ix = x + 16
-    iy = y + 12
-    c.text(ix, iy, HERO["kicker"], 3, RED)
-    head = HERO["headline"]
-    assert text_w(head, 6) <= w - 32, "headline hero kepanjangan"
-    c.text(ix, iy + 30, head, 6, NAVY)
-    ay = iy + 30 + 48 + 8
-    draw_tanker_art(c, ix, ay, 250, 136)
-    bx = ix + 250 + 16
-    bw = x + w - 16 - bx
-    body = wrap(HERO["body"], bw, 3)
-    assert len(body) <= 5, "bodi hero %d baris" % len(body)
-    c.para(bx, ay, body, 3, INK)
-    return y + h
-
-
-def draw_panel(c, p, x, y, w, h):
-    c.rect(x, y, w, h, PANEL)
-    c.border(x, y, w, h, LINE)
-    c.rect(x, y, 8, h, p["accent"])
-    ix = x + 20
-    iy = y + 12
-    iw = x + w - 16 - ix
-    c.text(ix, iy, p["kicker"], 3, p["accent"])
-    head = wrap(p["headline"], iw, 5)
-    assert len(head) <= 3, "headline panel %d baris" % len(head)
-    c.para(ix, iy + 30, head, 5, NAVY)
-    by = iy + 30 + len(head) * 40 + 6
-    body = wrap(p["body"], iw, 3)
-    assert len(body) <= 4, "bodi panel %d baris: %r" % (len(body), body)
-    c.para(ix, by, body, 3, INK)
-
-
-def render_a():
-    """Varian A (pemenang ronde 1): koran — hero + grid 2x2.
-
-    Perbaikan ronde 2 vs ronde 1: headline panel naik ke skala 5 (ronde 1
-    skala 4) supaya tetap terbaca di downscale 300 px; bodi dipadatkan ke
-    maks 4 baris supaya headline besar itu muat tanpa luapan.
-    """
-    c = Canvas()
-    c.border(8, 8, W - 16, H - 16, LINE)
-    draw_masthead(c)
-    draw_hero(c)
-    xs = (16, 524)
-    ys = (408, 696)
-    for i, p in enumerate(PANELS):
-        draw_panel(c, p, xs[i % 2], ys[i // 2], 484, 276)
-    c.text_center(982, FOOTER, 2, GREY)
-    return c
-
-
-def render_b():
-    """Varian B: lima baris bernomor — headline skala 5, bodi 2 baris."""
-    c = Canvas()
-    c.border(8, 8, W - 16, H - 16, LINE)
-    draw_masthead(c)
-    stories = [dict(HERO, accent=RED, short=HERO["body"])] + PANELS
-    # bodi hero dipendekkan untuk format baris (maks 2 baris skala 3)
-    stories[0]["short"] = ("Iran says 3 tankers hit mines Monday. US probes "
-                           "suspected cyberattacks on 50 tankers.")
-    y = 158
-    for i, s in enumerate(stories):
-        rh = 156
-        c.rect(16, y, 992, rh, PANEL)
-        c.border(16, y, 992, rh, LINE)
-        c.rect(16, y, 8, rh, s["accent"])
-        c.text(36, y + 48, str(i + 1), 8, s["accent"])
-        tx = 108
-        tw = 1008 - tx
-        head = wrap(s["headline"], tw, 5)
-        assert len(head) <= 2, "headline B %d baris" % len(head)
-        c.para(tx, y + 12, head, 5, NAVY)
-        by = y + 12 + len(head) * 40 + 4
-        body = wrap(s["short"], tw, 3)
-        assert len(body) <= 2, "bodi B %d baris" % len(body)
-        c.para(tx, by, body, 3, INK)
-        y += rh + 8
-    c.text_center(986, FOOTER, 2, GREY)
-    return c
-
-
-def main():
-    _note = r2_build_note()  # penanda revisi ronde 2 (tidak memengaruhi gambar)
-    variant = sys.argv[1] if len(sys.argv) > 1 else "A"
-    out = sys.argv[2] if len(sys.argv) > 2 else "/output/entry.png"
-    if variant == "A":
-        c = render_a()
-    elif variant == "B":
-        c = render_b()
-    else:
-        raise SystemExit("varian harus A atau B")
-    data = png_bytes(c)
+def main(argv):
+    variant = (argv[1] if len(argv) > 1 else "A").upper()
+    if variant not in VARIANTS:
+        raise SystemExit("varian tidak dikenal: %s (pilih A/B/C)" % variant)
+    out = argv[2] if len(argv) > 2 else "output/entry.png"
+    cv, log, end_y = render(variant)
+    data = png_bytes(cv)
     with open(out, "wb") as f:
         f.write(data)
+    print("varian %s -> %s" % (variant, out))
+    print("  sha256: %s" % hashlib.sha256(data).hexdigest())
+    print("  bytes: %d  footer_end_y=%d" % (len(data), end_y))
+    for name, yy in log:
+        print("  %-28s y=%d" % (name, yy))
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main(sys.argv))
