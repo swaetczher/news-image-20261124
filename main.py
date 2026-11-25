@@ -157,7 +157,7 @@ DATA = {
         ("GAZA DEATH TOLL SINCE TRUCE HITS 1,679",
          "4 killed in 24 hours; total 74,746 since Oct 2023"),
         ("HOUTHIS CLOSE IN ON ADEN AS CIVILIANS FLEE",
-         "Saudi strikes killed 822 civilians since Sept"),
+         "822 civilians killed and injured since Sept"),
         ("RECORD 2,100 MIGRANTS REACH CANARY IN A DAY",
          "Wednesday arrivals set new daily record"),
         ("SAUDI NATIONAL KIDNAPPED IN NIGER",

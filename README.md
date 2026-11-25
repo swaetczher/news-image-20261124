@@ -4,7 +4,7 @@
 [![rank](https://make.fun/badge/news-image-20261124/swaetczher/news-image-20261124/rank.svg)](https://make.fun/bounty/news-image-20261124/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=news-image-20261124)
 [![reward](https://make.fun/badge/news-image-20261124/swaetczher/news-image-20261124/reward.svg)](https://make.fun/bounty/news-image-20261124?utm_source=github&utm_medium=readme&utm_campaign=news-image-20261124)
 
-Ringkasan berita dunia Selasa 24 November 2026 dalam satu gambar: Ukraina tenggelamkan korvet Rusia Merkury di lepas Libya, korban serangan drone di Dymer naik jadi 11 tewas, gelombang kecaman pasca-runtuhnya COP31, kebakaran pabrik di Banten menewaskan 24 orang, dan pengadilan banding AS membuka jalan bagi Trump untuk menghapus vonis hush money.
+Ringkasan berita dunia Selasa 24 November 2026 dalam satu gambar: Iran klaim dua tanker lagi kena ranjau di Hormuz (total enam), Nvidia anjlok 5,9% Selasa usai reli 31% Senin, Sanofi taruhan $41 miliar disambut pasar, anggota Politburo China keempat diselidiki sejak 2025, dan Senegal pertahankan gelar — plus 27 berita ringkas lainnya (32 berita, 8 region).
 
 ## Run it
 
